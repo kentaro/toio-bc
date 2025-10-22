@@ -1,0 +1,26 @@
+ws:
+  uri: "ws://127.0.0.1:8765/ws"
+  ping_interval_sec: 1.0
+  timeout_sec: 2.0
+
+robot:
+  mac_address: null
+  name_prefix: "toio Core Cube"
+  scan_timeout_sec: 10.0
+  scan_retry: 3
+
+control:
+  max_speed: 100
+  deadzone: 0.08
+  expo: 0.3
+  slew_rate: 300
+  rate_hz: 60
+  invert_x: false
+  invert_y: false
+
+safety:
+  estop_on_disconnect: true
+
+recording:
+  enabled: true
+  output_dir: "./datasets"

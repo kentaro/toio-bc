@@ -1,0 +1,23 @@
+[project]
+name = "lerobot-toio-webctrl"
+version = "0.1.0"
+description = "Control toio via LeRobot using a web-based joystick leader."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "websockets>=11",
+    "pyyaml",
+    "bleak",
+    "lerobot",
+    "numpy",
+    "pillow",
+    "torch>=2.0.0",
+]
+
+[tool.uv.sources]
+lerobot = { git = "https://github.com/faboplatform/LeRobot.git", rev = "main" }
+
+[tool.uv]
+package = false

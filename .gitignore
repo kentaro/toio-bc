@@ -1,0 +1,20 @@
+# Virtual environments
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Local configuration
+config.yaml
+
+# uv metadata
+.uv/
+.uv-cache/
+
+# Claude Code
+.claude/
+
+# Datasets and models
+datasets/
+models/
