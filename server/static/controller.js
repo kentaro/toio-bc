@@ -11,17 +11,14 @@ const motorRight = document.getElementById("motor-right");
 const speedValue = document.getElementById("speed-value");
 const speedSlider = document.getElementById("speed-slider");
 const joystickStick = document.getElementById("joystick-stick");
+const joystickBase = joystickStick.parentElement;
 
-// Joystick direction indicators
+// Joystick direction indicators (4-way only)
 const joystickIndicators = {
   n: document.querySelector('.joystick-dir-n'),
-  ne: document.querySelector('.joystick-dir-ne'),
   e: document.querySelector('.joystick-dir-e'),
-  se: document.querySelector('.joystick-dir-se'),
   s: document.querySelector('.joystick-dir-s'),
-  sw: document.querySelector('.joystick-dir-sw'),
   w: document.querySelector('.joystick-dir-w'),
-  nw: document.querySelector('.joystick-dir-nw'),
 };
 
 // Buttons
@@ -42,6 +39,9 @@ let speedMultiplier = 0.7;
 
 // Joystick state
 let joystickActive = false;
+
+// Rotation control - for pulsed 45° rotation
+let rotationTimeout = null;
 
 // WebSocket Connection
 function connect() {
@@ -84,6 +84,7 @@ function sendStick(x, y) {
   if (now - lastSend < sendInterval) return;
 
   lastSend = now;
+  console.log(`[SEND] x=${x.toFixed(2)}, y=${y.toFixed(2)}`);
   ws.send(JSON.stringify({
     type: "stick",
     x: x,
@@ -98,29 +99,44 @@ function updateControl() {
   const x = currentX * speedMultiplier;
   const y = currentY * speedMultiplier;
 
+  console.log(`[UPDATE] currentX=${currentX}, currentY=${currentY}, x=${x.toFixed(2)}, y=${y.toFixed(2)}`);
+
   // Update UI
   axisX.textContent = x.toFixed(2);
   axisY.textContent = y.toFixed(2);
 
-  // Update joystick visual position (digital snapping)
+  // Update joystick visual position (snap to 4 directions only)
   const maxOffset = 60; // max pixels to move the stick
-  joystickStick.style.transform = `translate(calc(-50% + ${x * maxOffset}px), calc(-50% + ${-y * maxOffset}px))`;
+  const visualX = x * maxOffset;
+  const visualY = -y * maxOffset; // Invert Y for screen coordinates (screen down = negative visual offset)
+  joystickStick.style.transform = `translate(calc(-50% + ${visualX}px), calc(-50% + ${visualY}px))`;
 
   // Calculate motor values (differential drive)
-  const turningSensitivity = 0.7;
-  const adjustedX = x * turningSensitivity;
+  let left, right;
 
-  let left = y + adjustedX;
-  let right = y - adjustedX;
+  if (y === 0 && x !== 0) {
+    // Pure rotation (left/right only): slow rotation for precise 45° turns
+    // Left motor and right motor spin in opposite directions at low speed
+    const rotationSpeed = 30; // Low speed for controlled rotation
+    left = x * rotationSpeed;
+    right = -x * rotationSpeed;
+  } else {
+    // Forward/backward or combined movement
+    const turningSensitivity = 0.7;
+    const adjustedX = x * turningSensitivity;
 
-  // Normalize to -1 to 1 range
-  const maxVal = Math.max(Math.abs(left), Math.abs(right), 1);
-  left = left / maxVal;
-  right = right / maxVal;
+    left = y + adjustedX;
+    right = y - adjustedX;
 
-  // Scale to -100 to 100 and apply speed multiplier
-  left = Math.round(left * 100 * speedMultiplier);
-  right = Math.round(right * 100 * speedMultiplier);
+    // Normalize to -1 to 1 range
+    const maxVal = Math.max(Math.abs(left), Math.abs(right), 1);
+    left = left / maxVal;
+    right = right / maxVal;
+
+    // Scale to -100 to 100 and apply speed multiplier
+    left = Math.round(left * 100 * speedMultiplier);
+    right = Math.round(right * 100 * speedMultiplier);
+  }
 
   motorLeft.textContent = left;
   motorRight.textContent = right;
@@ -131,12 +147,13 @@ function updateControl() {
 
 // Calculate digital direction from angle and distance
 // Returns 8-way digital input: N, NE, E, SE, S, SW, W, NW, or neutral
+// Prioritizes cardinal directions (N/S/E/W) with wider zones for easier operation
 function calculateDigitalDirection(touchX, touchY, baseRect) {
   const centerX = baseRect.left + baseRect.width / 2;
   const centerY = baseRect.top + baseRect.height / 2;
 
   const deltaX = touchX - centerX;
-  const deltaY = touchY - centerY;
+  const deltaY = touchY - centerY; // Screen down = positive deltaY = move down/backward
 
   const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
   const deadzone = 30; // pixels from center
@@ -145,51 +162,38 @@ function calculateDigitalDirection(touchX, touchY, baseRect) {
     return { x: 0, y: 0, direction: null };
   }
 
-  // Calculate angle in degrees (0 = right, 90 = down, 180 = left, 270 = up)
+  // Calculate angle in screen coordinates
+  // atan2(deltaY, deltaX): 0° = right, 90° = down, 180° = left, -90° = up
   let angle = Math.atan2(deltaY, deltaX) * 180 / Math.PI;
 
   // Normalize to 0-360
   if (angle < 0) angle += 360;
 
-  // Convert to direction with Y-up coordinate system (inverted Y)
-  // Adjust angle so 0° = up
-  angle = (450 - angle) % 360;
+  // Debug: log angle
+  console.log(`Angle: ${angle.toFixed(1)}°, deltaX=${deltaX.toFixed(1)}, deltaY=${deltaY.toFixed(1)}`);
 
-  // 8-way digital direction (45° segments)
+  // Map screen coordinates to robot coordinates
+  // Screen: 0°=right, 90°=down, 180°=left, 270°=up
+  // User expects: drag UP = forward, drag DOWN = backward
+  // 4-way only (no diagonals) with 90° zones each
   let x = 0, y = 0, direction = null;
 
-  if (angle >= 337.5 || angle < 22.5) {
-    // N (up)
+  if (angle >= 225 && angle < 315) {
+    // Screen UP (270°) = Robot FORWARD
     y = 1;
     direction = 'n';
-  } else if (angle >= 22.5 && angle < 67.5) {
-    // NE
-    x = 1; y = 1;
-    direction = 'ne';
-  } else if (angle >= 67.5 && angle < 112.5) {
-    // E (right)
+  } else if ((angle >= 315 && angle < 360) || (angle >= 0 && angle < 45)) {
+    // Screen RIGHT (0°) = Robot RIGHT turn
     x = 1;
     direction = 'e';
-  } else if (angle >= 112.5 && angle < 157.5) {
-    // SE
-    x = 1; y = -1;
-    direction = 'se';
-  } else if (angle >= 157.5 && angle < 202.5) {
-    // S (down)
+  } else if (angle >= 45 && angle < 135) {
+    // Screen DOWN (90°) = Robot BACKWARD
     y = -1;
     direction = 's';
-  } else if (angle >= 202.5 && angle < 247.5) {
-    // SW
-    x = -1; y = -1;
-    direction = 'sw';
-  } else if (angle >= 247.5 && angle < 292.5) {
-    // W (left)
+  } else if (angle >= 135 && angle < 225) {
+    // Screen LEFT (180°) = Robot LEFT turn
     x = -1;
     direction = 'w';
-  } else if (angle >= 292.5 && angle < 337.5) {
-    // NW
-    x = -1; y = 1;
-    direction = 'nw';
   }
 
   return { x, y, direction };
@@ -209,6 +213,9 @@ function handleJoystickMove(touchX, touchY) {
   const baseRect = joystickStick.parentElement.getBoundingClientRect();
   const { x, y, direction } = calculateDigitalDirection(touchX, touchY, baseRect);
 
+  // Debug: log direction
+  console.log(`Touch: direction=${direction}, x=${x}, y=${y}`);
+
   currentX = x;
   currentY = y;
 
@@ -225,42 +232,56 @@ function handleJoystickMove(touchX, touchY) {
 }
 
 function resetJoystick() {
+  console.log('[RESET] Stopping all movement');
   currentX = 0;
   currentY = 0;
   joystickActive = false;
   joystickStick.classList.remove('active');
   joystickStick.style.transform = 'translate(-50%, -50%)';
   updateDirectionLabels(null);
+
+  // Force send stop command immediately
+  if (connected && ws) {
+    ws.send(JSON.stringify({
+      type: "stick",
+      x: 0,
+      y: 0,
+      ts: performance.now() / 1000
+    }));
+  }
+
   updateControl();
 }
 
-// Touch events for joystick
-joystickStick.addEventListener('touchstart', (e) => {
+// Touch events for joystick - attach to base for better touch tracking
+joystickBase.addEventListener('touchstart', (e) => {
   e.preventDefault();
   const touch = e.touches[0];
   handleJoystickMove(touch.clientX, touch.clientY);
 });
 
-joystickStick.addEventListener('touchmove', (e) => {
+joystickBase.addEventListener('touchmove', (e) => {
   e.preventDefault();
   const touch = e.touches[0];
   handleJoystickMove(touch.clientX, touch.clientY);
 });
 
-joystickStick.addEventListener('touchend', (e) => {
+joystickBase.addEventListener('touchend', (e) => {
   e.preventDefault();
+  console.log('[TOUCH END] Resetting joystick');
   resetJoystick();
 });
 
-joystickStick.addEventListener('touchcancel', (e) => {
+joystickBase.addEventListener('touchcancel', (e) => {
   e.preventDefault();
+  console.log('[TOUCH CANCEL] Resetting joystick');
   resetJoystick();
 });
 
 // Mouse events for joystick (desktop)
 let mouseDown = false;
 
-joystickStick.addEventListener('mousedown', (e) => {
+joystickBase.addEventListener('mousedown', (e) => {
   mouseDown = true;
   handleJoystickMove(e.clientX, e.clientY);
 });
@@ -274,6 +295,7 @@ document.addEventListener('mousemove', (e) => {
 document.addEventListener('mouseup', () => {
   if (mouseDown) {
     mouseDown = false;
+    console.log('[MOUSE UP] Resetting joystick');
     resetJoystick();
   }
 });
@@ -311,7 +333,7 @@ btnEndEpisode.addEventListener("click", () => {
   }
 });
 
-// Keyboard controls (8-way digital)
+// Keyboard controls (4-way only - no diagonals)
 const keyMap = {
   'w': { x: 0, y: 1, dir: 'n' },
   'W': { x: 0, y: 1, dir: 'n' },
@@ -333,43 +355,19 @@ window.addEventListener("keydown", (e) => {
   const mapping = keyMap[e.key];
   if (mapping && !e.repeat) {
     e.preventDefault();
+
+    // Only allow one key at a time (4-way only, no combining for diagonals)
+    activeKeys.clear();
     activeKeys.add(e.key);
 
-    // Combine active keys for diagonal movement
-    let x = 0, y = 0, dir = null;
-    for (const key of activeKeys) {
-      const m = keyMap[key];
-      x += m.x;
-      y += m.y;
-    }
+    currentX = mapping.x;
+    currentY = mapping.y;
 
-    // Clamp to -1, 0, 1
-    x = Math.max(-1, Math.min(1, x));
-    y = Math.max(-1, Math.min(1, y));
+    joystickStick.classList.add('active');
+    const maxOffset = 60;
+    joystickStick.style.transform = `translate(calc(-50% + ${currentX * maxOffset}px), calc(-50% + ${-currentY * maxOffset}px))`;
 
-    // Determine direction
-    if (x === 0 && y === 1) dir = 'n';
-    else if (x === 1 && y === 1) dir = 'ne';
-    else if (x === 1 && y === 0) dir = 'e';
-    else if (x === 1 && y === -1) dir = 'se';
-    else if (x === 0 && y === -1) dir = 's';
-    else if (x === -1 && y === -1) dir = 'sw';
-    else if (x === -1 && y === 0) dir = 'w';
-    else if (x === -1 && y === 1) dir = 'nw';
-
-    currentX = x;
-    currentY = y;
-
-    if (x !== 0 || y !== 0) {
-      joystickStick.classList.add('active');
-      const maxOffset = 60;
-      joystickStick.style.transform = `translate(calc(-50% + ${x * maxOffset}px), calc(-50% + ${-y * maxOffset}px))`;
-    } else {
-      joystickStick.classList.remove('active');
-      joystickStick.style.transform = 'translate(-50%, -50%)';
-    }
-
-    updateDirectionLabels(dir);
+    updateDirectionLabels(mapping.dir);
     updateControl();
   }
 });
@@ -380,39 +378,14 @@ window.addEventListener("keyup", (e) => {
     e.preventDefault();
     activeKeys.delete(e.key);
 
-    // Recalculate direction from remaining keys
-    let x = 0, y = 0, dir = null;
-    for (const key of activeKeys) {
-      const m = keyMap[key];
-      x += m.x;
-      y += m.y;
-    }
-
-    x = Math.max(-1, Math.min(1, x));
-    y = Math.max(-1, Math.min(1, y));
-
-    if (x === 0 && y === 1) dir = 'n';
-    else if (x === 1 && y === 1) dir = 'ne';
-    else if (x === 1 && y === 0) dir = 'e';
-    else if (x === 1 && y === -1) dir = 'se';
-    else if (x === 0 && y === -1) dir = 's';
-    else if (x === -1 && y === -1) dir = 'sw';
-    else if (x === -1 && y === 0) dir = 'w';
-    else if (x === -1 && y === 1) dir = 'nw';
-
-    currentX = x;
-    currentY = y;
-
-    if (x !== 0 || y !== 0) {
-      const maxOffset = 60;
-      joystickStick.style.transform = `translate(calc(-50% + ${x * maxOffset}px), calc(-50% + ${-y * maxOffset}px))`;
-    } else {
+    if (activeKeys.size === 0) {
+      currentX = 0;
+      currentY = 0;
       joystickStick.classList.remove('active');
       joystickStick.style.transform = 'translate(-50%, -50%)';
+      updateDirectionLabels(null);
+      updateControl();
     }
-
-    updateDirectionLabels(dir);
-    updateControl();
   }
 });
 
