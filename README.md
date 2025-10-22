@@ -401,5 +401,5 @@ MIT
 ## 謝辞
 
 - [LeRobot](https://github.com/huggingface/lerobot) - Hugging Face のロボット学習フレームワーク
-- [LeRobot日本語ドキュメント](https://faboplatform.github.io/LeRobotDocs/) - LeRobotの包括的な日本語リファレンス
+- [FaBo LeRobot Docs](https://faboplatform.github.io/LeRobotDocs/) - LeRobot環境構築ガイド・作業メモ
 - [toio](https://toio.io/) - Sony の小型教育ロボット
