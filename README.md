@@ -67,11 +67,13 @@ recording:
   output_dir: "./datasets"
 ```
 
-## 使い方
+## データ収集と学習
 
-### 基本的な遠隔操作
+### 1. エピソードの記録
 
-#### 1. WebSocketサーバーの起動
+#### システムの起動
+
+**1. WebSocketサーバーの起動**
 
 ```bash
 uv run python scripts/run_server.py
@@ -79,7 +81,7 @@ uv run python scripts/run_server.py
 
 ブラウザで http://localhost:8765 を開く
 
-#### 2. Operatorの起動
+**2. Operatorの起動**
 
 ```bash
 uv run python scripts/run_operator.py
@@ -87,7 +89,7 @@ uv run python scripts/run_operator.py
 
 toioに自動接続され、Webコントローラーで操作できます。
 
-### 操作方法
+#### 操作方法
 
 **D-Padボタン:**
 - 上ボタン: 前進
@@ -105,13 +107,9 @@ toioに自動接続され、Webコントローラーで操作できます。
 - 速度スライダー: 速度を20%〜100%に調整
 - 緊急停止ボタン: toioを即座に停止
 
-## データ収集と学習
+#### 記録の設定
 
-### 1. エピソードの記録
-
-#### 記録開始の設定
-
-`config.yaml` で記録を有効化：
+`config.yaml` で記録を有効化（デフォルトで有効）：
 
 ```yaml
 recording:
@@ -121,9 +119,9 @@ recording:
 
 #### 記録の実行
 
-1. WebSocketサーバーとOperatorを起動
+1. 上記のシステムを起動
 2. Webコントローラーで「記録開始」ボタンをクリック
-3. toioを操作してデモンストレーション
+3. toioを操作してデモンストレーション（特に衝突回避を多様に）
 4. 「記録終了」ボタンをクリック（エピソードが自動保存されます）
 5. 必要な数だけエピソードを繰り返し記録
 
