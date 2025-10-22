@@ -21,7 +21,7 @@ class Frame:
     """Single frame of recorded data."""
 
     timestamp: float
-    observation_state: list[float]  # [collision, past_actions...] collision flag + action history
+    observation_state: list[float]  # [collision, random_seed]
     action: list[float]  # [left_motor, right_motor] commands
     frame_index: int
     episode_index: int
@@ -55,8 +55,8 @@ class EpisodeRecorder:
     Records teleoperation data in LeRobot dataset format.
 
     LeRobot dataset structure:
-    - observation.state: Input state (collision flag)
-    - action: Motor commands (left, right)
+    - observation.state: Input state [collision, random_seed]
+    - action: Motor commands [left, right]
     - episode_index: Which episode this frame belongs to
     - frame_index: Frame number within episode
     - timestamp: Time within episode (seconds)
@@ -64,6 +64,7 @@ class EpisodeRecorder:
 
     Observation state format:
     - [0]: collision detected (0.0 or 1.0)
+    - [1]: random seed for avoidance pattern selection (0.0-1.0)
     """
 
     def __init__(self, output_dir: Path | str, fps: float = 60.0, dataset_name: str = "toio_dataset"):
@@ -87,16 +88,18 @@ class EpisodeRecorder:
         # Check for existing dataset and set the starting episode index
         self.episode_offset = self._get_existing_episode_count()
 
-        # Action history for observation (keeps last 3 actions)
-        self.action_history: list[tuple[float, float]] = [(0.0, 0.0)] * 3
+        # Random seed for collision avoidance pattern selection
+        self.current_random_seed: float = 0.0
+        self.collision_active: bool = False
 
     def start_episode(self) -> None:
         """Start recording a new episode."""
         episode_index = self.episode_offset + len(self.episodes)
         self.current_episode = Episode(episode_index=episode_index)
         self.is_recording = True
-        # Reset action history at the start of each episode
-        self.action_history = [(0.0, 0.0)] * 3
+        # Reset collision state
+        self.current_random_seed = 0.0
+        self.collision_active = False
         print(f"[Recorder] Started episode {episode_index}")
 
     def record_frame(
@@ -124,10 +127,22 @@ class EpisodeRecorder:
         else:
             timestamp = time.time() - self.current_episode.start_time
 
-        # Build observation: [collision, past_left_3, past_right_3, past_left_2, past_right_2, past_left_1, past_right_1]
-        observation_state = [float(1.0 if collision else 0.0)]
-        for left, right in self.action_history:
-            observation_state.extend([left, right])
+        # Collision state management: generate new random seed on collision start
+        if collision and not self.collision_active:
+            # New collision event - generate random seed
+            import random
+            self.current_random_seed = random.random()
+            self.collision_active = True
+        elif not collision and self.collision_active:
+            # Collision ended - reset
+            self.current_random_seed = 0.0
+            self.collision_active = False
+
+        # Build observation: [collision, random_seed]
+        observation_state = [
+            float(1.0 if collision else 0.0),
+            float(self.current_random_seed),
+        ]
 
         frame = Frame(
             timestamp=timestamp,
@@ -139,10 +154,6 @@ class EpisodeRecorder:
         )
 
         self.current_episode.frames.append(frame)
-
-        # Update action history (shift and add new action)
-        self.action_history.pop(0)
-        self.action_history.append((float(action_left), float(action_right)))
 
     def end_episode(self) -> None:
         """End the current episode, mark the last frame as done, and save to dataset."""
@@ -287,8 +298,8 @@ class EpisodeRecorder:
             "features": {
                 "observation.state": {
                     "dtype": "float32",
-                    "shape": [1],
-                    "names": ["collision"],
+                    "shape": [2],
+                    "names": ["collision", "random_seed"],
                 },
                 "action": {
                     "dtype": "float32",

@@ -125,19 +125,7 @@ datasets/toio_dataset/
     └── episodes.json     # エピソード情報
 ```
 
-### 2. データの再生
-
-記録したエピソードを再生して確認：
-
-```bash
-# 最初のエピソードを再生
-uv run python scripts/replay_dataset.py ./datasets/toio_dataset --episode 0
-
-# 別のエピソードを再生
-uv run python scripts/replay_dataset.py ./datasets/toio_dataset --episode 1
-```
-
-### 3. モデルの訓練
+### 2. モデルの訓練
 
 収集したデータから行動クローニングモデルを訓練：
 
@@ -152,7 +140,7 @@ uv run python scripts/train.py ./datasets/toio_dataset --epochs 100 --output ./m
 
 訓練が完了すると、`./models/policy.pth` にモデルが保存されます。
 
-### 4. 自律制御の実行
+### 3. 自律制御の実行
 
 訓練したモデルでtoioを自律制御：
 
@@ -169,10 +157,10 @@ Ctrl+Cで停止できます。
 
 ```python
 {
-  "observation.state": [[x, y, collision], ...],  # shape: (N, 3)
-    # x: ジョイスティックX軸 (-1.0 〜 1.0)
-    # y: ジョイスティックY軸 (-1.0 〜 1.0)
-    # collision: 衝突検知 (0.0 または 1.0)
+  "observation.state": [[collision, random_seed], ...],  # shape: (N, 2)
+    # collision: 衝突検知フラグ (0.0 = 正常, 1.0 = 衝突)
+    # random_seed: 回避パターン選択用ランダム値 (0.0〜1.0)
+    #              衝突時に生成され、モデルが多様な回避行動を出力するために使用
 
   "action": [[left_motor, right_motor], ...],     # shape: (N, 2)
     # left_motor: 左モーター指令値 (-100 〜 100)
@@ -184,6 +172,20 @@ Ctrl+Cで停止できます。
   "next.done": [False, ..., True, ...],           # shape: (N,)
 }
 ```
+
+### 観測空間の設計
+
+**collision (衝突フラグ)**
+- 通常時: 0.0
+- 衝突検出時: 1.0
+- toioの衝突センサーから取得
+
+**random_seed (パターン選択値)**
+- 通常時: 0.0
+- 衝突時: 0.0〜1.0のランダム値
+- データ収集時に各衝突イベントごとに生成
+- モデルはこの値に基づいて異なる回避パターンを学習
+- 推論時もランダム値を生成することで多様な回避行動を実現
 
 ## プロジェクト構成
 
@@ -198,9 +200,11 @@ lerobot-toio-webctrl/
 ├── models/                      # 訓練済みモデル
 │   └── policy.pth
 ├── scripts/                     # ユーティリティスクリプト
-│   ├── replay_dataset.py        # エピソード再生
+│   ├── run_server.py            # WebSocketサーバー起動
+│   ├── run_operator.py          # オペレーター起動
 │   ├── train.py                 # モデル訓練
-│   └── inference.py             # 自律制御実行
+│   ├── inference.py             # 自律制御実行
+│   └── replay_dataset.py        # データセット再生(デバッグ用)
 ├── server/                      # WebSocketサーバー
 │   ├── main.py
 │   └── static/
@@ -249,6 +253,49 @@ recording:
   output_dir: "./datasets"        # 出力ディレクトリ
 ```
 
+## データ収集のベストプラクティス
+
+### サンプリングレートの設定根拠
+
+toioの技術仕様に基づいた推奨設定:
+
+**制御ループ周波数 (rate_hz)**
+- **推奨: 50-60Hz** (config.yamlのデフォルト: 60Hz)
+- 根拠:
+  - toio BLE接続間隔: 10-30ms (仕様)
+  - toioモーター速度通知: 10Hz/100ms間隔
+  - 60Hz = 16.7ms周期 → BLE接続間隔と整合
+  - モーターコマンド持続時間: 50ms (3倍オーバーラップで連続性確保)
+
+**データ記録の粒度**
+- 観測(observation): 20-30Hz推奨
+  - toioのセンサー更新頻度(10Hz)より高い
+  - カメラなし構成では30Hzで十分
+- 行動(action): 50-60Hz推奨
+  - 制御ループと同期
+  - 滑らかな動作の再現に必要
+
+**エピソード設計**
+- 長さ: 5-15秒/エピソード推奨
+  - 短すぎると文脈が失われる
+  - 長すぎると環境変化・ドリフトが混入
+  - toioのような小型ロボットは10秒前後が最適
+- 総数: 20-30エピソード以上
+  - 多様な状況(直進、旋回、衝突回避)を含める
+  - 衝突回避は複数パターン記録
+
+### BLEの安定性
+
+**通信安定化のヒント**
+- Write Without Response使用(実装済み)
+- 過度な送信頻度で詰まる場合は50Hzへ下げる
+- macOS 10.12などで通知遅延がある場合は注意
+
+**環境依存の調整**
+- BLE混雑時: `rate_hz: 50` または `rate_hz: 30` へ下げる
+- 推論時の安定性優先: `rate_hz: 50`
+- データ収集時の高精度: `rate_hz: 60`
+
 ## トラブルシューティング
 
 ### toioが見つからない
@@ -264,6 +311,12 @@ recording:
 - 衝突回避のデモを複数パターン記録する
 - エポック数を増やす (`--epochs 200`)
 - バッチサイズを調整 (`--batch-size 64`)
+
+### BLE接続が不安定
+
+- 制御周波数を下げる: `config.yaml` で `rate_hz: 50` または `30`
+- 他のBluetooth機器との干渉を避ける
+- toioとの距離を近づける(推奨: 2m以内)
 
 ## ライセンス
 

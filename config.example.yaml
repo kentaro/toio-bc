@@ -14,6 +14,12 @@ control:
   deadzone: 0.08
   expo: 0.3
   slew_rate: 300
+  # Control loop frequency (Hz)
+  # Recommended: 50-60Hz for toio based on BLE specs
+  # - BLE connection interval: ~10-30ms (toio spec)
+  # - Motor speed notification: 10Hz (100ms, toio spec)
+  # - 60Hz = 16.7ms period, compatible with BLE timing
+  # Lower to 30-50Hz if BLE congestion occurs
   rate_hz: 60
   invert_x: false
   invert_y: false

@@ -55,7 +55,7 @@ class ToioDataset(Dataset):
 class PolicyNetwork(nn.Module):
     """Simple MLP policy for behavior cloning."""
 
-    def __init__(self, obs_dim=3, action_dim=2, hidden_dim=128):
+    def __init__(self, obs_dim=2, action_dim=2, hidden_dim=128):
         super().__init__()
         self.network = nn.Sequential(
             nn.Linear(obs_dim, hidden_dim),
@@ -127,7 +127,7 @@ def train(
     torch.save(
         {
             "model_state_dict": model.state_dict(),
-            "obs_dim": 3,
+            "obs_dim": 2,
             "action_dim": 2,
         },
         output_path,
