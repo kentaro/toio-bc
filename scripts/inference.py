@@ -8,7 +8,6 @@ reacting to collisions and following the learned behavior.
 
 import argparse
 import asyncio
-import random
 import signal
 import sys
 from pathlib import Path
@@ -71,14 +70,13 @@ async def run_inference(
     duration_ms = max(30, duration_ms)
 
     # Autonomous behavior: always use model predictions
-    # Observation: [collision, random_seed] - 2D input
-    observation = torch.zeros(2, device=device)
+    # Observation: [collision] - 1D input
+    observation = torch.zeros(1, device=device)
 
     # Collision state management
     collision_active = False
     collision_end_time = 0.0
     collision_duration = 1.0  # Hold collision flag for 1 second
-    current_seed = 0.0  # Random seed for current collision event
 
     try:
         while not stop_event.is_set():
@@ -88,18 +86,15 @@ async def run_inference(
             if driver.consume_collision():
                 collision_active = True
                 collision_end_time = current_time + collision_duration
-                current_seed = random.random()  # Generate random seed for variety
-                print(f"[Inference] Collision detected! Seed={current_seed:.3f}")
+                print(f"[Inference] Collision detected!")
 
             # Check if collision period has expired
             if collision_active and current_time > collision_end_time:
                 collision_active = False
-                current_seed = 0.0
                 print("[Inference] Collision flag deactivated")
 
-            # Build observation: [collision, random_seed]
+            # Build observation: [collision]
             observation[0] = 1.0 if collision_active else 0.0
-            observation[1] = current_seed
 
             # Always use model to predict action (both normal and avoidance)
             with torch.no_grad():
@@ -114,7 +109,7 @@ async def run_inference(
 
             # Print detailed status
             collision_str = "COLLISION" if collision_active else "normal"
-            print(f"[Inference] {collision_str}: L={left_motor:4d}, R={right_motor:4d} | obs=[{observation[0]:.1f}, {observation[1]:.3f}]")
+            print(f"[Inference] {collision_str}: L={left_motor:4d}, R={right_motor:4d} | collision={observation[0]:.1f}")
 
             await asyncio.sleep(period)
 
