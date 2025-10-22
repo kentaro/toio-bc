@@ -10,13 +10,21 @@ const motorLeft = document.getElementById("motor-left");
 const motorRight = document.getElementById("motor-right");
 const speedValue = document.getElementById("speed-value");
 const speedSlider = document.getElementById("speed-slider");
-const directionIndicator = document.getElementById("direction-indicator");
+const joystickStick = document.getElementById("joystick-stick");
+
+// Joystick direction indicators
+const joystickIndicators = {
+  n: document.querySelector('.joystick-dir-n'),
+  ne: document.querySelector('.joystick-dir-ne'),
+  e: document.querySelector('.joystick-dir-e'),
+  se: document.querySelector('.joystick-dir-se'),
+  s: document.querySelector('.joystick-dir-s'),
+  sw: document.querySelector('.joystick-dir-sw'),
+  w: document.querySelector('.joystick-dir-w'),
+  nw: document.querySelector('.joystick-dir-nw'),
+};
 
 // Buttons
-const btnForward = document.getElementById("btn-forward");
-const btnBackward = document.getElementById("btn-backward");
-const btnLeft = document.getElementById("btn-left");
-const btnRight = document.getElementById("btn-right");
 const btnEstop = document.getElementById("estop");
 const btnStartEpisode = document.getElementById("start-episode");
 const btnEndEpisode = document.getElementById("end-episode");
@@ -32,8 +40,8 @@ let currentX = 0;
 let currentY = 0;
 let speedMultiplier = 0.7;
 
-// Direction button state
-const activeButtons = new Set();
+// Joystick state
+let joystickActive = false;
 
 // WebSocket Connection
 function connect() {
@@ -94,17 +102,11 @@ function updateControl() {
   axisX.textContent = x.toFixed(2);
   axisY.textContent = y.toFixed(2);
 
-  // Update direction indicator
-  if (x !== 0 || y !== 0) {
-    directionIndicator.classList.add("active");
-  } else {
-    directionIndicator.classList.remove("active");
-  }
+  // Update joystick visual position (digital snapping)
+  const maxOffset = 60; // max pixels to move the stick
+  joystickStick.style.transform = `translate(calc(-50% + ${x * maxOffset}px), calc(-50% + ${-y * maxOffset}px))`;
 
   // Calculate motor values (differential drive)
-  // Y is forward/backward, X is turning
-  // Turning sensitivity: balance between sharp turns and control
-  // 0.7 allows clear turning while maintaining forward momentum
   const turningSensitivity = 0.7;
   const adjustedX = x * turningSensitivity;
 
@@ -127,74 +129,154 @@ function updateControl() {
   sendStick(x, y);
 }
 
-// Handle direction buttons
-function handleButtonPress(direction) {
-  activeButtons.add(direction);
-  updateDirectionFromButtons();
+// Calculate digital direction from angle and distance
+// Returns 8-way digital input: N, NE, E, SE, S, SW, W, NW, or neutral
+function calculateDigitalDirection(touchX, touchY, baseRect) {
+  const centerX = baseRect.left + baseRect.width / 2;
+  const centerY = baseRect.top + baseRect.height / 2;
+
+  const deltaX = touchX - centerX;
+  const deltaY = touchY - centerY;
+
+  const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+  const deadzone = 30; // pixels from center
+
+  if (distance < deadzone) {
+    return { x: 0, y: 0, direction: null };
+  }
+
+  // Calculate angle in degrees (0 = right, 90 = down, 180 = left, 270 = up)
+  let angle = Math.atan2(deltaY, deltaX) * 180 / Math.PI;
+
+  // Normalize to 0-360
+  if (angle < 0) angle += 360;
+
+  // Convert to direction with Y-up coordinate system (inverted Y)
+  // Adjust angle so 0° = up
+  angle = (450 - angle) % 360;
+
+  // 8-way digital direction (45° segments)
+  let x = 0, y = 0, direction = null;
+
+  if (angle >= 337.5 || angle < 22.5) {
+    // N (up)
+    y = 1;
+    direction = 'n';
+  } else if (angle >= 22.5 && angle < 67.5) {
+    // NE
+    x = 1; y = 1;
+    direction = 'ne';
+  } else if (angle >= 67.5 && angle < 112.5) {
+    // E (right)
+    x = 1;
+    direction = 'e';
+  } else if (angle >= 112.5 && angle < 157.5) {
+    // SE
+    x = 1; y = -1;
+    direction = 'se';
+  } else if (angle >= 157.5 && angle < 202.5) {
+    // S (down)
+    y = -1;
+    direction = 's';
+  } else if (angle >= 202.5 && angle < 247.5) {
+    // SW
+    x = -1; y = -1;
+    direction = 'sw';
+  } else if (angle >= 247.5 && angle < 292.5) {
+    // W (left)
+    x = -1;
+    direction = 'w';
+  } else if (angle >= 292.5 && angle < 337.5) {
+    // NW
+    x = -1; y = 1;
+    direction = 'nw';
+  }
+
+  return { x, y, direction };
 }
 
-function handleButtonRelease(direction) {
-  activeButtons.delete(direction);
-  updateDirectionFromButtons();
+// Update direction indicators
+function updateDirectionLabels(activeDirection) {
+  Object.keys(joystickIndicators).forEach(dir => {
+    if (joystickIndicators[dir]) {
+      joystickIndicators[dir].classList.toggle('active', dir === activeDirection);
+    }
+  });
 }
 
-function updateDirectionFromButtons() {
-  // Reset
-  currentX = 0;
-  currentY = 0;
+// Handle joystick interaction
+function handleJoystickMove(touchX, touchY) {
+  const baseRect = joystickStick.parentElement.getBoundingClientRect();
+  const { x, y, direction } = calculateDigitalDirection(touchX, touchY, baseRect);
 
-  // Calculate based on active buttons
-  if (activeButtons.has("forward")) currentY += 1;
-  if (activeButtons.has("backward")) currentY -= 1;
-  if (activeButtons.has("left")) currentX -= 1;
-  if (activeButtons.has("right")) currentX += 1;
+  currentX = x;
+  currentY = y;
 
-  // Update visual state
-  btnForward.classList.toggle("active", activeButtons.has("forward"));
-  btnBackward.classList.toggle("active", activeButtons.has("backward"));
-  btnLeft.classList.toggle("active", activeButtons.has("left"));
-  btnRight.classList.toggle("active", activeButtons.has("right"));
+  if (x !== 0 || y !== 0) {
+    joystickStick.classList.add('active');
+    joystickActive = true;
+  } else {
+    joystickStick.classList.remove('active');
+    joystickActive = false;
+  }
 
+  updateDirectionLabels(direction);
   updateControl();
 }
 
-// Button Event Listeners (touch and mouse)
-function addButtonListeners(button, direction) {
-  // Touch events
-  button.addEventListener("touchstart", (e) => {
-    e.preventDefault();
-    handleButtonPress(direction);
-  });
-
-  button.addEventListener("touchend", (e) => {
-    e.preventDefault();
-    handleButtonRelease(direction);
-  });
-
-  button.addEventListener("touchcancel", (e) => {
-    e.preventDefault();
-    handleButtonRelease(direction);
-  });
-
-  // Mouse events (for desktop)
-  button.addEventListener("mousedown", () => {
-    handleButtonPress(direction);
-  });
-
-  button.addEventListener("mouseup", () => {
-    handleButtonRelease(direction);
-  });
-
-  button.addEventListener("mouseleave", () => {
-    handleButtonRelease(direction);
-  });
+function resetJoystick() {
+  currentX = 0;
+  currentY = 0;
+  joystickActive = false;
+  joystickStick.classList.remove('active');
+  joystickStick.style.transform = 'translate(-50%, -50%)';
+  updateDirectionLabels(null);
+  updateControl();
 }
 
-// Setup direction buttons
-addButtonListeners(btnForward, "forward");
-addButtonListeners(btnBackward, "backward");
-addButtonListeners(btnLeft, "left");
-addButtonListeners(btnRight, "right");
+// Touch events for joystick
+joystickStick.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  const touch = e.touches[0];
+  handleJoystickMove(touch.clientX, touch.clientY);
+});
+
+joystickStick.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  const touch = e.touches[0];
+  handleJoystickMove(touch.clientX, touch.clientY);
+});
+
+joystickStick.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  resetJoystick();
+});
+
+joystickStick.addEventListener('touchcancel', (e) => {
+  e.preventDefault();
+  resetJoystick();
+});
+
+// Mouse events for joystick (desktop)
+let mouseDown = false;
+
+joystickStick.addEventListener('mousedown', (e) => {
+  mouseDown = true;
+  handleJoystickMove(e.clientX, e.clientY);
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (mouseDown) {
+    handleJoystickMove(e.clientX, e.clientY);
+  }
+});
+
+document.addEventListener('mouseup', () => {
+  if (mouseDown) {
+    mouseDown = false;
+    resetJoystick();
+  }
+});
 
 // Speed slider
 speedSlider.addEventListener("input", (e) => {
@@ -209,10 +291,7 @@ btnEstop.addEventListener("click", () => {
   if (ws && connected) {
     ws.send(JSON.stringify({ type: "estop", reason: "user" }));
   }
-  activeButtons.clear();
-  currentX = 0;
-  currentY = 0;
-  updateControl();
+  resetJoystick();
 });
 
 // Recording controls
@@ -232,35 +311,108 @@ btnEndEpisode.addEventListener("click", () => {
   }
 });
 
-// Keyboard controls
+// Keyboard controls (8-way digital)
 const keyMap = {
-  'w': 'forward',
-  'W': 'forward',
-  'ArrowUp': 'forward',
-  's': 'backward',
-  'S': 'backward',
-  'ArrowDown': 'backward',
-  'a': 'left',
-  'A': 'left',
-  'ArrowLeft': 'left',
-  'd': 'right',
-  'D': 'right',
-  'ArrowRight': 'right',
+  'w': { x: 0, y: 1, dir: 'n' },
+  'W': { x: 0, y: 1, dir: 'n' },
+  'ArrowUp': { x: 0, y: 1, dir: 'n' },
+  's': { x: 0, y: -1, dir: 's' },
+  'S': { x: 0, y: -1, dir: 's' },
+  'ArrowDown': { x: 0, y: -1, dir: 's' },
+  'a': { x: -1, y: 0, dir: 'w' },
+  'A': { x: -1, y: 0, dir: 'w' },
+  'ArrowLeft': { x: -1, y: 0, dir: 'w' },
+  'd': { x: 1, y: 0, dir: 'e' },
+  'D': { x: 1, y: 0, dir: 'e' },
+  'ArrowRight': { x: 1, y: 0, dir: 'e' },
 };
 
+let activeKeys = new Set();
+
 window.addEventListener("keydown", (e) => {
-  const direction = keyMap[e.key];
-  if (direction && !e.repeat) {
+  const mapping = keyMap[e.key];
+  if (mapping && !e.repeat) {
     e.preventDefault();
-    handleButtonPress(direction);
+    activeKeys.add(e.key);
+
+    // Combine active keys for diagonal movement
+    let x = 0, y = 0, dir = null;
+    for (const key of activeKeys) {
+      const m = keyMap[key];
+      x += m.x;
+      y += m.y;
+    }
+
+    // Clamp to -1, 0, 1
+    x = Math.max(-1, Math.min(1, x));
+    y = Math.max(-1, Math.min(1, y));
+
+    // Determine direction
+    if (x === 0 && y === 1) dir = 'n';
+    else if (x === 1 && y === 1) dir = 'ne';
+    else if (x === 1 && y === 0) dir = 'e';
+    else if (x === 1 && y === -1) dir = 'se';
+    else if (x === 0 && y === -1) dir = 's';
+    else if (x === -1 && y === -1) dir = 'sw';
+    else if (x === -1 && y === 0) dir = 'w';
+    else if (x === -1 && y === 1) dir = 'nw';
+
+    currentX = x;
+    currentY = y;
+
+    if (x !== 0 || y !== 0) {
+      joystickStick.classList.add('active');
+      const maxOffset = 60;
+      joystickStick.style.transform = `translate(calc(-50% + ${x * maxOffset}px), calc(-50% + ${-y * maxOffset}px))`;
+    } else {
+      joystickStick.classList.remove('active');
+      joystickStick.style.transform = 'translate(-50%, -50%)';
+    }
+
+    updateDirectionLabels(dir);
+    updateControl();
   }
 });
 
 window.addEventListener("keyup", (e) => {
-  const direction = keyMap[e.key];
-  if (direction) {
+  const mapping = keyMap[e.key];
+  if (mapping) {
     e.preventDefault();
-    handleButtonRelease(direction);
+    activeKeys.delete(e.key);
+
+    // Recalculate direction from remaining keys
+    let x = 0, y = 0, dir = null;
+    for (const key of activeKeys) {
+      const m = keyMap[key];
+      x += m.x;
+      y += m.y;
+    }
+
+    x = Math.max(-1, Math.min(1, x));
+    y = Math.max(-1, Math.min(1, y));
+
+    if (x === 0 && y === 1) dir = 'n';
+    else if (x === 1 && y === 1) dir = 'ne';
+    else if (x === 1 && y === 0) dir = 'e';
+    else if (x === 1 && y === -1) dir = 'se';
+    else if (x === 0 && y === -1) dir = 's';
+    else if (x === -1 && y === -1) dir = 'sw';
+    else if (x === -1 && y === 0) dir = 'w';
+    else if (x === -1 && y === 1) dir = 'nw';
+
+    currentX = x;
+    currentY = y;
+
+    if (x !== 0 || y !== 0) {
+      const maxOffset = 60;
+      joystickStick.style.transform = `translate(calc(-50% + ${x * maxOffset}px), calc(-50% + ${-y * maxOffset}px))`;
+    } else {
+      joystickStick.classList.remove('active');
+      joystickStick.style.transform = 'translate(-50%, -50%)';
+    }
+
+    updateDirectionLabels(dir);
+    updateControl();
   }
 });
 
@@ -272,9 +424,9 @@ document.addEventListener("contextmenu", (e) => {
 // Initialize connection
 connect();
 
-// Send periodic updates when buttons are pressed
+// Send periodic updates when joystick is active
 setInterval(() => {
-  if (activeButtons.size > 0) {
+  if (joystickActive || activeKeys.size > 0) {
     updateControl();
   }
 }, sendInterval);

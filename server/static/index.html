@@ -19,33 +19,25 @@
 
       <!-- Main Control Area -->
       <main class="main">
-        <!-- D-Pad Controls -->
+        <!-- Joystick Controls -->
         <div class="control-section">
           <h2 class="section-title">方向制御</h2>
-          <div class="dpad">
-            <button class="dpad-btn dpad-up" id="btn-forward" aria-label="前進">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
-                <path d="M12 19V5M5 12l7-7 7 7"/>
-              </svg>
-            </button>
-            <button class="dpad-btn dpad-left" id="btn-left" aria-label="左旋回">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
-                <path d="M19 12H5M12 19l-7-7 7-7"/>
-              </svg>
-            </button>
-            <div class="dpad-center">
-              <div class="dpad-indicator" id="direction-indicator"></div>
+          <div class="joystick-container">
+            <div class="joystick-base">
+              <!-- Direction indicators (subtle dots) -->
+              <div class="joystick-direction-indicator joystick-dir-n"></div>
+              <div class="joystick-direction-indicator joystick-dir-ne"></div>
+              <div class="joystick-direction-indicator joystick-dir-e"></div>
+              <div class="joystick-direction-indicator joystick-dir-se"></div>
+              <div class="joystick-direction-indicator joystick-dir-s"></div>
+              <div class="joystick-direction-indicator joystick-dir-sw"></div>
+              <div class="joystick-direction-indicator joystick-dir-w"></div>
+              <div class="joystick-direction-indicator joystick-dir-nw"></div>
+
+              <div class="joystick-stick" id="joystick-stick">
+                <div class="joystick-knob"></div>
+              </div>
             </div>
-            <button class="dpad-btn dpad-right" id="btn-right" aria-label="右旋回">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
-                <path d="M5 12h14M12 5l7 7-7 7"/>
-              </svg>
-            </button>
-            <button class="dpad-btn dpad-down" id="btn-backward" aria-label="後退">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round">
-                <path d="M12 5v14M19 12l-7 7-7-7"/>
-              </svg>
-            </button>
           </div>
 
           <!-- Speed Control -->
