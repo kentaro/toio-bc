@@ -103,8 +103,9 @@ function updateControl() {
 
   // Calculate motor values (differential drive)
   // Y is forward/backward, X is turning
-  // Reduce turning sensitivity to 5% to prevent spinning
-  const turningSensitivity = 0.05;
+  // Turning sensitivity: balance between sharp turns and control
+  // 0.7 allows clear turning while maintaining forward momentum
+  const turningSensitivity = 0.7;
   const adjustedX = x * turningSensitivity;
 
   let left = y + adjustedX;
