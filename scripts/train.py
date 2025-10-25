@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Train a policy model from recorded demonstrations.
+Train a policy model from generated synthetic data.
 
-This script trains a simple behavior cloning model using recorded episodes.
-The model learns to map observations (joystick input + collision) to actions (motor commands).
+This script trains a simple behavior cloning model using generated episodes.
+The model learns to map observations [collision, rotation_direction, frame_count] to actions (motor commands).
 """
 
 import argparse
@@ -24,7 +24,7 @@ from torch.utils.data import Dataset, DataLoader
 class ToioDataset(Dataset):
     """Dataset for toio recorded episodes."""
 
-    def __init__(self, dataset_path: Path):
+    def __init__(self, dataset_path: Path, collision_weight: float = 10.0):
         """Load dataset from npz file."""
         data_file = dataset_path / "data.npz"
         if not data_file.exists():
@@ -33,13 +33,27 @@ class ToioDataset(Dataset):
         data = np.load(data_file)
         # Normalize observations and actions to [-1, 1] range
         observations = data["observation.state"]
-        # Clip actions to [-100, 100] first, then scale to [-1, 1]
-        actions = np.clip(data["action"], -100.0, 100.0) / 100.0
+        # Find actual action range in data and normalize to [-1, 1]
+        actions_raw = data["action"]
+        action_max = max(abs(actions_raw.min()), abs(actions_raw.max()))
+        actions = actions_raw / action_max  # Normalize to actual data range
 
         self.observations = torch.FloatTensor(observations)
         self.actions = torch.FloatTensor(actions)
+        self.action_max = action_max  # Store for inference scaling
 
+        # Create sample weights: higher weight for collision frames
+        collision_mask = observations[:, 0] == 1.0  # First dimension is collision flag
+        weights = np.ones(len(observations))
+        weights[collision_mask] = collision_weight
+        self.weights = torch.FloatTensor(weights)
+
+        num_collision = collision_mask.sum()
+        num_normal = len(observations) - num_collision
         print(f"Loaded dataset: {len(self.observations)} samples")
+        print(f"  Normal frames: {num_normal} ({100.0 * num_normal / len(observations):.1f}%)")
+        print(f"  Collision frames: {num_collision} ({100.0 * num_collision / len(observations):.1f}%)")
+        print(f"  Collision weight: {collision_weight}x")
         print(f"  Observation shape: {self.observations.shape}")
         print(f"  Action shape: {self.actions.shape}")
         print(f"  Observation range: [{self.observations.min():.2f}, {self.observations.max():.2f}]")
@@ -49,13 +63,13 @@ class ToioDataset(Dataset):
         return len(self.observations)
 
     def __getitem__(self, idx):
-        return self.observations[idx], self.actions[idx]
+        return self.observations[idx], self.actions[idx], self.weights[idx]
 
 
 class PolicyNetwork(nn.Module):
     """Simple MLP policy for behavior cloning."""
 
-    def __init__(self, obs_dim=1, action_dim=2, hidden_dim=128):
+    def __init__(self, obs_dim=2, action_dim=2, hidden_dim=128):
         super().__init__()
         self.network = nn.Sequential(
             nn.Linear(obs_dim, hidden_dim),
@@ -86,8 +100,9 @@ def train(
     dataset = ToioDataset(dataset_path)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
-    # Create model
-    model = PolicyNetwork().to(device)
+    # Create model - use observation dimension from dataset
+    obs_dim = dataset.observations.shape[1]
+    model = PolicyNetwork(obs_dim=obs_dim).to(device)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.MSELoss()
 
@@ -101,13 +116,16 @@ def train(
         total_loss = 0
         num_batches = 0
 
-        for obs, actions in dataloader:
+        for obs, actions, weights in dataloader:
             obs = obs.to(device)
             actions = actions.to(device)
+            weights = weights.to(device)
 
             # Forward pass
             predicted_actions = model(obs)
-            loss = criterion(predicted_actions, actions)
+            # Apply per-sample weights to loss
+            loss_per_sample = ((predicted_actions - actions) ** 2).mean(dim=1)
+            loss = (loss_per_sample * weights).mean()
 
             # Backward pass
             optimizer.zero_grad()
@@ -127,8 +145,9 @@ def train(
     torch.save(
         {
             "model_state_dict": model.state_dict(),
-            "obs_dim": 1,
+            "obs_dim": obs_dim,
             "action_dim": 2,
+            "action_max": float(dataset.action_max),  # Save for inference scaling
         },
         output_path,
     )
@@ -139,7 +158,7 @@ def train(
     model.eval()
     with torch.no_grad():
         total_error = 0
-        for obs, actions in dataloader:
+        for obs, actions, _ in dataloader:
             obs = obs.to(device)
             actions = actions.to(device)
             predicted = model(obs)
@@ -147,7 +166,7 @@ def train(
             total_error += error.item()
 
         avg_error = total_error / len(dataloader)
-        print(f"Average absolute error: {avg_error:.2f} (motor units)")
+        print(f"Average absolute error: {avg_error:.2f} (normalized units)")
 
 
 def main():

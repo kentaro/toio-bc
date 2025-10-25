@@ -8,27 +8,17 @@ robot:
   name_prefix: "toio Core Cube"
   scan_timeout_sec: 10.0
   scan_retry: 3
+  collision_threshold: 3
 
 control:
   max_speed: 100
   deadzone: 0.08
-  # Expo curve for input shaping (0.0 = linear, higher = more exponential)
-  # For behavior cloning: 0.0 recommended for clearer training signals
-  # For manual control: 0.2-0.3 for smoother feel
-  expo: 0.0
-  # Slew rate limiting (speed/second) - higher = more responsive
-  # For behavior cloning: 500-800 recommended for clear intent signals
-  # For smooth control: 200-300
-  slew_rate: 600
-  # Control loop frequency (Hz)
-  # Recommended: 50-60Hz for toio based on BLE specs
-  # - BLE connection interval: ~10-30ms (toio spec)
-  # - Motor speed notification: 10Hz (100ms, toio spec)
-  # - 60Hz = 16.7ms period, compatible with BLE timing
-  # Lower to 30-50Hz if BLE congestion occurs
+  expo: 0.3
+  slew_rate: 300
   rate_hz: 60
   invert_x: false
   invert_y: false
+  rotation_gain: 1.0
 
 safety:
   estop_on_disconnect: true

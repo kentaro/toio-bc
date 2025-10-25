@@ -4,6 +4,10 @@ Replay recorded episodes on toio.
 
 This script loads a recorded dataset and replays the actions on the toio cube,
 allowing you to verify that the recorded data is correct.
+
+The dataset contains:
+- Observations: [collision, joystick_x, joystick_y] (3D)
+- Actions: [left_motor, right_motor] (2D)
 """
 
 import argparse
@@ -32,11 +36,13 @@ async def replay_episode(driver: ToioDriver, dataset_path: Path, episode_idx: in
 
     # Extract episode data
     episode_indices = data["episode_index"]
+    observations = data["observation.state"]
     actions = data["action"]
     timestamps = data["timestamp"]
 
     # Filter for the requested episode
     episode_mask = episode_indices == episode_idx
+    episode_observations = observations[episode_mask]
     episode_actions = actions[episode_mask]
     episode_timestamps = timestamps[episode_mask]
 
@@ -44,6 +50,11 @@ async def replay_episode(driver: ToioDriver, dataset_path: Path, episode_idx: in
         raise ValueError(f"Episode {episode_idx} not found in dataset")
 
     print(f"\n[Replay] Episode {episode_idx}: {len(episode_actions)} frames")
+    print(f"[Replay] Observation shape: {episode_observations.shape}")
+    if episode_observations.shape[1] >= 3:
+        print(f"[Replay] Observation format: [collision, joystick_x, joystick_y]")
+    else:
+        print(f"[Replay] Observation format: [collision] (old format)")
     print(f"[Replay] Action range: L=[{episode_actions[:, 0].min():.1f}, {episode_actions[:, 0].max():.1f}], "
           f"R=[{episode_actions[:, 1].min():.1f}, {episode_actions[:, 1].max():.1f}]")
     print("[Replay] Starting...")
@@ -108,6 +119,7 @@ async def main():
             name_prefix=robot_cfg.get("name_prefix", "toio Core Cube"),
             scan_timeout_sec=robot_cfg.get("scan_timeout_sec", 10.0),
             scan_retry=robot_cfg.get("scan_retry", 3),
+            collision_threshold=robot_cfg.get("collision_threshold", 3),
         )
     )
 

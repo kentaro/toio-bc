@@ -18,3 +18,4 @@ config.yaml
 # Datasets and models
 datasets/
 models/
+!models/policy.example.pth

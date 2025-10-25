@@ -1,41 +1,33 @@
-# LeRobot × toio Web Controller
+# LeRobot × toio 行動クローニングフレームワーク
 
-toio Core Cubeの**衝突センサーを活用した自律的な障害物回避行動**を、行動クローニング（Behavior Cloning）で学習するシステムです。
+toio Core Cubeを行動クローニング（Behavior Cloning）で自律制御するための汎用フレームワークです。
 
-Webブラウザからtoioを操作してデモンストレーションを記録し、機械学習モデルが衝突検知からの回避行動を学習します。学習後のモデルはtoioを自律制御し、壁や障害物にぶつかると自動的に回避行動を実行します。
+## システムの特徴
 
-## 主な特徴
+**汎用的な行動学習基盤**
+- Web UIを使った直感的なテレオペレーション
+- スマホ対応のジョイスティックでデモンストレーションを記録
+- 記録したデータから行動パターンを学習
+- 様々なタスクに応用可能（追従、パターン走行、衝突回避など）
 
-- **衝突検知による回避学習**: toioの衝突センサーから回避行動を学習
-  - ユーザーが様々な回避パターン（右回転、左回転、後退など）をデモンストレーション
-  - モデルが衝突時の多様な回避行動を学習
-  - Roombaのような自律走行を実現
+**シンプルな機械学習アプローチ**
+- PyTorchによる行動クローニング（シンプルな3層MLP）
+- 観測空間と行動空間を自由に設計可能
+- CPU のみで訓練可能（数秒〜数十秒）
 
-- **純粋な行動クローニング**: ユーザーのデモンストレーションのみから学習
-  - 観測: 衝突フラグ（0.0 or 1.0）のみのシンプルな入力
-  - 行動: 左右モーター速度（-100〜100）
-  - 合成データやルールベースのロジックなし
+**2つのデータ収集方法**
+- **手動収集**: Web UIでテレオペレーションしてデモンストレーションを記録
+- **合成データ**: スクリプトで理想的なパターンを生成
 
-- **Web UI による直感的なデータ収集**:
-  - スマホ/PCブラウザから操作
-  - リアルタイムなテレオペレーション
-  - ワンクリックでエピソード記録
-
-## システム構成
-
-```
-Web UI (ブラウザ)
-    ↓ WebSocket
-WebSocketサーバー (Python/FastAPI)
-    ↓ WebSocket
-Operator (Python)
-    ↓ BLE
-toio Core Cube
-```
+**実装例：自律的な障害物回避**
+- 前進→衝突検知→後退→約45度回転→前進を繰り返すRoomba風の動作
+- 観測: `[collision, rotation_direction, frame_count]` (3次元)
+- 行動: `[left_motor, right_motor]` (2次元、範囲 -100〜100)
+- 衝突検知がピーキーなため、合成データで訓練した学習済みモデル（`models/policy.example.pth`）を同梱
 
 ## セットアップ
 
-### 1. 依存関係のインストール
+### 依存関係のインストール
 
 [uv](https://github.com/astral-sh/uv) を使用します：
 
@@ -48,30 +40,42 @@ uv sync
 source .venv/bin/activate
 ```
 
-### 2. 設定ファイルの準備
+### 設定ファイルの準備
 
 ```bash
 cp config.example.yaml config.yaml
 ```
 
-`config.yaml` を編集して環境に合わせて設定：
+必要に応じて `config.yaml` を編集：
 
 ```yaml
-# toio の MAC アドレス (自動検出する場合は null のまま)
 robot:
-  mac_address: null  # または "XX:XX:XX:XX:XX:XX"
-
-# データ記録の設定
-recording:
-  enabled: true
-  output_dir: "./datasets"
+  mac_address: null  # toioのMACアドレス (自動検出する場合はnull)
+  collision_threshold: 3  # 衝突検知感度 (1-10: 小さいほど敏感)
 ```
 
-## データ収集と学習
+## 使い方
 
-### 1. エピソードの記録
+### 学習済みモデルで自律制御
 
-#### システムの起動
+同梱の学習済みモデル (`models/policy.example.pth`) を使用：
+
+```bash
+uv run python scripts/inference.py models/policy.example.pth
+```
+
+toioは以下のパターンで動作します：
+1. 前進（速度40）
+2. 壁に衝突検知
+3. 後退（10フレーム = 約0.17秒）
+4. 左右どちらかに約45度回転（12フレーム = 約0.2秒）
+5. 1に戻る
+
+Ctrl+Cで停止できます。
+
+### 自分でモデルを訓練する
+
+#### 方法1: Web UIで手動データ収集（推奨）
 
 **1. WebSocketサーバーの起動**
 
@@ -90,147 +94,103 @@ uv run python scripts/run_operator.py
 
 toioに自動接続され、Webコントローラーで操作できます。
 
-#### 操作方法
+**3. データ収集**
 
-**ジョイスティック (タッチ/マウス):**
-- ジョイスティックをドラッグして8方向に操作
-- 上: 前進
-- 下: 後退
-- 左/右: 旋回
-- 斜め: 前進/後退しながら旋回
+1. Webコントローラーで「記録開始」ボタンをクリック
+2. toioを操作してデモンストレーション
+   - 前進、回転などの基本動作
+   - 壁にぶつかった時の回避行動を多様に記録
+3. 「記録終了」ボタンをクリック（エピソードが自動保存）
+4. 必要な数だけエピソードを繰り返し記録（20エピソード以上推奨）
 
-**キーボード (PCの場合):**
-- W / ↑: 前進
-- S / ↓: 後退
-- A / ←: 左旋回
-- D / →: 右旋回
-- 組み合わせで斜め移動可能 (例: W+D で右前進)
+保存先: `./datasets/toio_dataset/`
 
-**その他:**
-- 速度スライダー: 速度を20%〜100%に調整
-- 緊急停止ボタン: toioを即座に停止
+**注意**: 衝突検知がピーキーで安定した学習データを得るのが難しい場合があります。その場合は方法2の合成データをお試しください。
 
-#### 記録の設定
+#### 方法2: 合成データの生成（代替手段）
 
-`config.yaml` で記録を有効化（デフォルトで有効）：
-
-```yaml
-recording:
-  enabled: true
-  output_dir: "./datasets"
-```
-
-#### 記録の実行
-
-1. 上記のシステムを起動
-2. Webコントローラーで「記録開始」ボタンをクリック
-3. toioを操作してデモンストレーション（特に衝突回避を多様に）
-4. 「記録終了」ボタンをクリック（エピソードが自動保存されます）
-5. 必要な数だけエピソードを繰り返し記録
-
-保存されるデータ:
-```
-datasets/toio_dataset/
-├── data.npz              # 全フレームデータ
-└── meta/
-    ├── info.json         # データセット情報
-    └── episodes.json     # エピソード情報
-```
-
-### 2. データの確認 (オプション)
-
-記録したデータセットを確認:
+手動データ収集が難しい場合、スクリプトで理想的なパターンを生成できます：
 
 ```bash
-# データセット情報を表示
-uv run python scripts/replay_dataset.py ./datasets/toio_dataset
-
-# 特定のエピソードを再生
-uv run python scripts/replay_dataset.py ./datasets/toio_dataset --episode 0
+uv run python scripts/generate_dummy_data.py \
+  --episodes 20 \
+  --forward-frames 60 \
+  --backward-frames 10 \
+  --rotation-frames 12 \
+  --forward-speed 40 \
+  --backward-speed 40 \
+  --rotation-speed 40
 ```
 
-### 3. モデルの訓練
+生成されるデータ：
+- 20エピソード（左右回転が交互）
+- 各エピソード: 60フレーム前進 + 10フレーム後退 + 12フレーム回転
+- 観測: `[collision, rotation_direction, frame_count]`
+  - `collision`: 0.0（通常）/ 1.0（衝突中）
+  - `rotation_direction`: -1.0（左回転）/ 1.0（右回転）/ 0.0（通常時）
+  - `frame_count`: 0.0〜1.0（衝突後の経過フレーム、正規化済み）
+- 行動: `[left_motor, right_motor]` (-40〜40の範囲)
 
-収集したデータから行動クローニングモデルを訓練：
+保存先: `./datasets/toio_dataset/`
+
+#### モデルの訓練
 
 ```bash
-uv run python scripts/train.py ./datasets/toio_dataset --epochs 100 --output ./models/policy.pth
+uv run python scripts/train.py ./datasets/toio_dataset \
+  --epochs 100 \
+  --batch-size 32 \
+  --learning-rate 0.001 \
+  --output ./models/policy.pth
 ```
 
-オプション:
-- `--epochs`: 訓練エポック数 (デフォルト: 100)
-- `--batch-size`: バッチサイズ (デフォルト: 32)
-- `--learning-rate`: 学習率 (デフォルト: 0.001)
+訓練のポイント：
+- 衝突フレームに10倍の重みをかけてデータ不均衡に対処
+- アクション値をデータの実際の範囲で正規化（-1〜1に変換）
+- Loss < 0.001 が目標（Lossが下がらない場合はデータ生成パラメータを調整）
 
-訓練が完了すると、`./models/policy.pth` にモデルが保存されます。
+**同梱モデル（policy.example.pth）の訓練結果**:
+- データセット: 30エピソード（合成データ、各82フレーム、計2460フレーム）
+- エポック数: 100
+- バッチサイズ: 32
+- 学習率: 0.001
+- Lossの推移:
+  - Epoch 1: Loss ≈ 0.15
+  - Epoch 10: Loss ≈ 0.01
+  - Epoch 30: Loss ≈ 0.001
+  - Epoch 100: Loss ≈ 0.0003（最終）
+- 訓練時間: 約10秒（CPUのみ）
 
-### 4. 自律制御の実行
+**期待される結果**: 同様のパラメータで訓練すれば、30エポック程度で Loss < 0.001 に到達するはずです。Loss が下がらない場合は、データセットの確認をお勧めします。
 
-訓練したモデルでtoioを自律制御：
+#### 訓練したモデルで推論
+
+どちらの方法でデータを収集した場合も、訓練後は同じように実行：
 
 ```bash
 uv run python scripts/inference.py ./models/policy.pth
 ```
 
-toioは訓練データから学習した行動パターンに従って自律的に動作します。
-Ctrl+Cで停止できます。
+## 観測空間の設計
 
-## データフォーマット
+### なぜframe_countが必要か
 
-### LeRobot互換データ構造
+このプロジェクトで使用している**単純なMLPモデルは決定論的**です。同じ観測からは常に同じ行動が出力されます。
 
-```python
-{
-  "observation.state": [[collision], ...],  # shape: (N, 1)
-    # collision: 衝突検知フラグ (0.0 = 正常, 1.0 = 衝突)
+**問題**: `[collision=1.0, rotation_direction=1.0]` だけでは不十分
+- 後退すべきか？回転すべきか？モデルは判断できない
+- 時系列的な状態遷移（後退→回転）を表現できない
+- 同じ観測が後退時と回転時の両方で現れるため、学習が困難
 
-  "action": [[left_motor, right_motor], ...],     # shape: (N, 2)
-    # left_motor: 左モーター指令値 (-100 〜 100)
-    # right_motor: 右モーター指令値 (-100 〜 100)
+**解決**: `frame_count` を追加
+- 衝突後の経過フレーム数を0.0〜1.0に正規化して観測に含める
+- モデルは `frame_count` の値から「後退フェーズ」か「回転フェーズ」かを学習
+- 推論時は単純にカウンターをインクリメントするだけ（時間計算や状態判定は不要）
 
-  "episode_index": [0, 0, ..., 1, 1, ...],        # shape: (N,)
-  "frame_index": [0, 1, 2, ..., 0, 1, ...],       # shape: (N,)
-  "timestamp": [0.0, 0.016, 0.033, ...],          # shape: (N,)
-  "next.done": [False, ..., True, ...],           # shape: (N,)
-}
-```
+例：
+- `[1.0, 1.0, 0.1]` → 後退（衝突直後、frame_countが小さい）
+- `[1.0, 1.0, 0.7]` → 右回転（後退完了後、frame_countが大きい）
 
-### 観測空間の設計
-
-このシステムの核心は、**衝突フラグという最小限の情報から回避行動を学習する**点です。
-
-**collision (衝突フラグ)**
-- 通常時: 0.0
-- 衝突検出時: 1.0
-- toioの衝突センサーから直接取得
-
-### 衝突検知から回避行動を学習する仕組み
-
-**1. データ収集フェーズ**
-- ユーザーがWebコントローラーでtoioを操作
-- 壁にぶつかったら、様々な方法で回避をデモンストレーション:
-  - 右回転して回避
-  - 左回転して回避
-  - 後退してから方向転換
-  - など、多様なパターンを実演
-- 衝突センサーの状態とモーター指令が記録される
-
-**2. 学習フェーズ**
-- モデルは `collision=0.0 → 前進` のパターンを学習
-- モデルは `collision=1.0 → 様々な回避行動` のパターンを学習
-- 同じ衝突状態でも、デモンストレーションの多様性から異なる回避パターンを学習
-
-**3. 推論フェーズ**
-- toioが自律走行中に壁にぶつかる
-- 衝突センサーが反応（collision=1.0）
-- モデルが学習した回避行動を出力
-- モデルの確率的性質により、実行のたびに異なる回避パターンが選ばれる
-
-**重要なポイント**:
-- 観測は衝突フラグのみだが、多様な回避行動が実現できる
-- 鍵はデータ収集時に**意識的に様々なパターンで回避をデモンストレーション**すること
-- 合成データや人工的なパターン生成は一切不要
-- 純粋にユーザーの操作から学習
+**補足**: VAEやGaussian Policyを使った確率的なモデルでは異なるアプローチも可能ですが、このプロジェクトではシンプルさを優先しています。
 
 ## プロジェクト構成
 
@@ -238,127 +198,51 @@ Ctrl+Cで停止できます。
 lerobot-toio-webctrl/
 ├── README.md
 ├── pyproject.toml
-├── config.yaml                  # 設定ファイル
-├── config.example.yaml
-├── datasets/                    # 記録したデータセット
+├── config.yaml                    # 設定ファイル（git管理外）
+├── config.example.yaml            # 設定ファイルのテンプレート
+├── models/
+│   ├── policy.example.pth         # 学習済みモデル（すぐ試せる）
+│   └── policy.pth                 # 自分で訓練したモデル（git管理外）
+├── datasets/                      # データセット（git管理外）
 │   └── toio_dataset/
-├── models/                      # 訓練済みモデル
-│   └── policy.pth
-├── scripts/                     # ユーティリティスクリプト
-│   ├── run_server.py            # WebSocketサーバー起動
-│   ├── run_operator.py          # オペレーター起動
-│   ├── train.py                 # モデル訓練
-│   ├── inference.py             # 自律制御実行
-│   └── replay_dataset.py        # データセット再生(デバッグ用)
-├── server/                      # WebSocketサーバー
-│   ├── main.py
-│   └── static/
-│       ├── index.html           # Webコントローラー UI
-│       ├── controller.js        # コントローラーロジック
-│       └── styles.css
-└── lerobot_operator/            # toio制御システム
-    ├── __init__.py
-    ├── run_operator.py          # メインループ
-    ├── websocket_leader.py      # WebSocket通信
-    ├── toio_driver.py           # toio BLE制御
-    ├── mixing.py                # モーター制御ミキシング
-    └── episode_recorder.py      # データ記録
+├── scripts/
+│   ├── generate_dummy_data.py     # 合成データ生成
+│   ├── train.py                   # モデル訓練
+│   ├── inference.py               # 自律制御実行
+│   └── replay_dataset.py          # データセット確認用
+└── lerobot_operator/
+    ├── toio_driver.py             # toio BLE制御ドライバー
+    └── ...
 ```
 
-## 高度な設定
+## 設定
 
-### config.yaml の詳細
+### config.yaml
 
 ```yaml
-ws:
-  uri: "ws://127.0.0.1:8765/ws"
-  ping_interval_sec: 1.0
-  timeout_sec: 2.0
-
 robot:
-  mac_address: null               # toioのMACアドレス (自動検出: null)
+  mac_address: null
   name_prefix: "toio Core Cube"
   scan_timeout_sec: 10.0
   scan_retry: 3
+  collision_threshold: 3
 
 control:
-  max_speed: 100                  # 最大速度 (0-100)
-  deadzone: 0.08                  # デッドゾーン（微小入力を無視）
-  expo: 0.0                       # 指数カーブ (0.0=線形, 学習用推奨)
-  slew_rate: 600                  # 加速度制限 (大きいほど即応性高い)
-  rate_hz: 60                     # 制御ループ周波数
-  invert_x: false                 # X軸反転
-  invert_y: false                 # Y軸反転
-
-safety:
-  estop_on_disconnect: true       # 切断時に緊急停止
-
-recording:
-  enabled: true                   # 記録機能の有効化
-  output_dir: "./datasets"        # 出力ディレクトリ
+  max_speed: 100
+  deadzone: 0.08
+  expo: 0.3
+  slew_rate: 300
+  rate_hz: 60
+  invert_x: false
+  invert_y: false
+  rotation_gain: 1.0
 ```
 
-## データ収集のベストプラクティス
-
-### コントローラー設定の調整
-
-**学習に適した設定（推奨）**:
-- `expo: 0.0` - 線形応答で明確な入力信号
-- `slew_rate: 600` - 高い応答性で意図が明確
-- Web UIの`turningSensitivity: 0.7` - 左右旋回が明確に
-
-**メリット**:
-- ユーザーの意図（前進/後退/左右旋回）が明確にデータに反映
-- モデルが学習しやすい明瞭なパターン
-- でも完全なバイナリ入力ではないため、自然な動作
-
-**滑らかな操作感が欲しい場合**:
-- `expo: 0.2-0.3` - 指数カーブで微妙な制御が可能
-- `slew_rate: 200-300` - よりスムーズな加減速
-- ただし学習データとしては曖昧になるため、訓練後の推論用に使用推奨
-
-### サンプリングレートの設定根拠
-
-toioの技術仕様に基づいた推奨設定:
-
-**制御ループ周波数 (rate_hz)**
-- **推奨: 50-60Hz** (config.yamlのデフォルト: 60Hz)
-- 根拠:
-  - toio BLE接続間隔: 10-30ms (仕様)
-  - toioモーター速度通知: 10Hz/100ms間隔
-  - 60Hz = 16.7ms周期 → BLE接続間隔と整合
-  - モーターコマンド持続時間: 50ms (3倍オーバーラップで連続性確保)
-
-**データ記録の粒度**
-- 観測(observation)と行動(action): 制御ループと同期（デフォルト60Hz）
-  - 実装では`fps=rate_hz`で制御周波数と記録周波数が一致
-  - toioのセンサー更新頻度(10Hz)より十分高い
-  - 滑らかな動作の再現に必要な時間解像度を確保
-
-**エピソード設計**
-- 長さ: 5-15秒/エピソード推奨
-  - 短すぎると文脈が失われる
-  - 長すぎると環境変化・ドリフトが混入
-  - toioのような小型ロボットは10秒前後が最適
-- 総数: 20-30エピソード以上
-  - **特に重要**: 衝突回避パターンを意識的に多様化
-    - 右回転での回避を数回
-    - 左回転での回避を数回
-    - 後退してから方向転換を数回
-    - 急旋回での回避を数回
-  - 通常の走行も含める（壁のない直進、旋回など）
-
-### BLEの安定性
-
-**通信安定化のヒント**
-- Write Without Response使用(実装済み)
-- 過度な送信頻度で詰まる場合は50Hzへ下げる
-- macOS 10.12などで通知遅延がある場合は注意
-
-**環境依存の調整**
-- BLE混雑時: `rate_hz: 50` または `rate_hz: 30` へ下げる
-- 推論時の安定性優先: `rate_hz: 50`
-- データ収集時の高精度: `rate_hz: 60`
+重要なパラメータ：
+- `collision_threshold`: 衝突検知の感度（1-10）
+  - 小さいほど敏感（誤検知が増える）
+  - 大きいほど鈍感（実際の衝突を見逃す）
+  - 推奨: 3（デフォルト）
 
 ## トラブルシューティング
 
@@ -368,32 +252,102 @@ toioの技術仕様に基づいた推奨設定:
 - Bluetoothがオンになっているか確認
 - `config.yaml` で `mac_address` を明示的に指定
 
-### 衝突時に同じ回避行動しかしない（回避パターンが単調）
+### 訓練時にLossが下がらない
 
-**原因**: データ収集時の回避パターンが偏っている
+- データ生成パラメータを確認
+  - `forward_speed`, `backward_speed`, `rotation_speed` が同じ値か
+  - エピソード数が十分か（20以上推奨）
+- エポック数を増やす（`--epochs 200`）
 
-**解決策**:
-- データ収集を見直し、意識的に多様な回避パターンをデモンストレーション:
-  - 右回転での回避
-  - 左回転での回避
-  - 後退してから旋回
-  - 急旋回、緩旋回など
-- 各パターンを複数回記録して、データセットのバランスを取る
-- 最低でも3-4種類の異なる回避パターンを含めることを推奨
+### 衝突検知が敏感すぎる/鈍すぎる
 
-### モデルの精度が低い・回避行動がうまく学習できない
+`config.yaml` の `collision_threshold` を調整：
 
-- より多くのエピソードを収集 (推奨: 20-30エピソード以上)
-- **特に重要**: 衝突回避のエピソードを多めに記録
-  - 衝突なしのエピソード: 衝突ありのエピソード = 1:1 程度が目安
-- エポック数を増やす (`--epochs 200` 〜 `--epochs 500`)
-- バッチサイズを調整 (`--batch-size 64`)
+```yaml
+robot:
+  collision_threshold: 2  # より敏感に（1〜10）
+```
 
-### BLE接続が不安定
+レベル2: より敏感（誤検知増）
+レベル3: デフォルト（推奨）
+レベル4: やや鈍感（見逃し増）
 
-- 制御周波数を下げる: `config.yaml` で `rate_hz: 50` または `30`
-- 他のBluetooth機器との干渉を避ける
-- toioとの距離を近づける(推奨: 2m以内)
+### 推論時に回転角度が大きすぎる/小さすぎる
+
+データ生成時の `--rotation-frames` を調整して再訓練：
+
+```bash
+# より小さい角度（例: 30度）
+uv run python scripts/generate_dummy_data.py --rotation-frames 8
+
+# より大きい角度（例: 90度）
+uv run python scripts/generate_dummy_data.py --rotation-frames 20
+```
+
+`rotation_frames=12` で約45度回転（推奨）
+
+## 技術的な詳細
+
+### 衝突回避における合成データの利点
+
+このシステムには手動操作でデータを収集する機能（Web UI + テレオペレーション）も実装されています。しかし、**衝突回避のような高速な反応が必要な動作**では、合成データの方が優れている場合があります。
+
+**衝突回避で手動データ収集が難しい理由**:
+- toioの衝突検知がピーキー（感度調整が難しい）
+- 人間の反応速度では衝突→後退→回転の一連の動作を安定して記録しにくい
+- ジョイスティックの微小なブレがノイズとなる
+- データの品質にばらつきが出やすい
+
+**合成データのアプローチ**:
+- 理想的な衝突回避パターンをスクリプトで生成
+- 決定論的で再現性のあるデータセット
+- Loss < 0.001 を安定して達成
+
+**他のユースケースでは**: 追従行動、特定パターンの走行など、人間が操作しやすいタスクでは手動データ収集も有効です。
+
+### モデルアーキテクチャ
+
+シンプルな3層全結合NN：
+- 入力: 3次元 `[collision, rotation_direction, frame_count]`
+- 隠れ層: 128次元 (ReLU) → 128次元 (ReLU)
+- 出力: 2次元 `[left_motor, right_motor]` (tanh、-1〜1に正規化)
+
+最適化:
+- Loss: MSE
+- Optimizer: Adam (lr=0.001)
+- 衝突フレームに10倍の重み
+
+### 推論時の動作
+
+```python
+# 推論ループ（簡略化）
+collision_active = False
+frame_count = 0
+
+while True:
+    if new_collision and not collision_active:
+        collision_active = True
+        frame_count = 0
+        rotation_direction = random.choice([-1.0, 1.0])
+
+    if collision_active:
+        frame_count += 1
+        if frame_count >= 22:  # 10 + 12
+            collision_active = False
+
+    obs = [
+        1.0 if collision_active else 0.0,
+        rotation_direction if collision_active else 0.0,
+        frame_count / 21.0 if collision_active else 0.0
+    ]
+
+    action = model(obs)
+    toio.move(action[0], action[1])
+```
+
+**重要**: 推論コードは状態遷移のロジックを持たない
+- カウンターをインクリメントするだけ
+- 「後退→回転」の切り替えはモデルが学習
 
 ## ライセンス
 
@@ -402,5 +356,5 @@ MIT
 ## 謝辞
 
 - [LeRobot](https://github.com/huggingface/lerobot) - Hugging Face のロボット学習フレームワーク
-- [FaBo LeRobot Docs](https://faboplatform.github.io/LeRobotDocs/) - LeRobot環境構築ガイド・作業メモ
+- [FaBo LeRobot Docs](https://faboplatform.github.io/LeRobotDocs/) - LeRobotでtoioを制御・学習する際の参考にさせていただきました。
 - [toio](https://toio.io/) - Sony の小型教育ロボット

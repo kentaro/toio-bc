@@ -23,6 +23,7 @@ class ToioDriverConfig:
     name_prefix: str = "toio Core Cube"
     scan_timeout_sec: float = 10.0
     scan_retry: int = 3
+    collision_threshold: int = 3  # 1-10: lower=more sensitive, higher=less sensitive
     service_uuid: str = DEFAULT_SERVICE_UUID
     motor_characteristic_uuid: str = DEFAULT_MOTOR_CHAR_UUID
     sensor_characteristic_uuid: str = DEFAULT_SENSOR_CHAR_UUID
@@ -121,12 +122,13 @@ class ToioDriver:
         # Set collision detection threshold
         # https://toio.github.io/toio-spec/docs/ble_configuration
         # Format: [0x06, 0x00, threshold]
-        # Threshold: 1-10 (default 7, lower = more sensitive)
-        collision_threshold_cmd = bytearray([0x06, 0x00, 0x04])  # Set to level 4
+        # Threshold: 1-10 (default 7, lower = more sensitive, higher = less sensitive)
+        threshold = max(1, min(10, self.cfg.collision_threshold))  # Clamp to valid range
+        collision_threshold_cmd = bytearray([0x06, 0x00, threshold])
 
         try:
             await client.write_gatt_char(self.cfg.config_characteristic_uuid, collision_threshold_cmd, response=True)
-            print(f"{LOG_PREFIX} Collision detection threshold set to level 4")
+            print(f"{LOG_PREFIX} Collision detection threshold set to level {threshold}")
         except Exception as e:
             print(f"{LOG_PREFIX} Warning: Failed to set collision threshold: {e}")
 

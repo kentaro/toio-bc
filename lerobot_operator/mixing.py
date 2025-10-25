@@ -11,11 +11,13 @@ class Mixer:
         rate_hz: float = 60.0,
         invert_x: bool = False,
         invert_y: bool = False,
+        rotation_gain: float = 0.3,  # Reduce rotation sensitivity (0.0-1.0)
     ) -> None:
         self.max_speed = float(max_speed)
         self.deadzone = float(deadzone)
         self.expo = float(expo)
         self.slew_rate = float(slew_rate)
+        self.rotation_gain = float(rotation_gain)
         self.dt = 1.0 / float(rate_hz)
         self.invx = -1.0 if invert_x else 1.0
         self.invy = -1.0 if invert_y else 1.0
@@ -38,6 +40,9 @@ class Mixer:
 
         x = self._shape(x)
         y = self._shape(y)
+
+        # Apply rotation gain to reduce X-axis sensitivity
+        x = x * self.rotation_gain
 
         left = y + x
         right = y - x

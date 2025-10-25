@@ -67,6 +67,7 @@ async def run(config_path: Path) -> None:
             name_prefix=str(robot_cfg.get("name_prefix", "toio Core Cube")),
             scan_timeout_sec=float(robot_cfg.get("scan_timeout_sec", 10.0)),
             scan_retry=int(robot_cfg.get("scan_retry", 3)),
+            collision_threshold=int(robot_cfg.get("collision_threshold", 3)),
         )
     )
     await driver.connect()
@@ -102,27 +103,17 @@ async def run(config_path: Path) -> None:
     # Collision state management
     collision_active = False
     collision_end_time = 0.0
-    collision_duration = 1.0  # Keep collision flag active for 1.0 seconds
-    collision_delay_frames = 3  # Wait 3 frames before setting collision flag
-    collision_countdown = 0  # Countdown before activating collision flag
+    collision_duration = 0.1  # Keep collision flag active for 0.1 seconds (only capture initial strong rotation)
 
     try:
         while not stop_event.is_set():
             current_time = asyncio.get_event_loop().time()
 
-            # Check for new collisions
+            # Check for new collisions - activate immediately
             if driver.consume_collision():
-                # Start countdown to delay collision flag activation
-                collision_countdown = collision_delay_frames
+                collision_active = True
                 collision_end_time = current_time + collision_duration
-                print(f"[loop] COLLISION detected! Will activate flag in {collision_delay_frames} frames")
-
-            # Update collision countdown and activation
-            if collision_countdown > 0:
-                collision_countdown -= 1
-                if collision_countdown == 0:
-                    collision_active = True
-                    print(f"[loop] Collision flag ACTIVATED (will hold for {collision_duration}s)")
+                print(f"[loop] COLLISION detected! Flag activated")
 
             # Check if collision period has expired
             if collision_active and current_time > collision_end_time:
@@ -143,11 +134,22 @@ async def run(config_path: Path) -> None:
 
                 # Record frame if recording is active
                 if recorder and recorder.is_recording:
-                    recorder.record_frame(
-                        action_left=left,
-                        action_right=right,
-                        collision=collision_active,
-                    )
+                    # Skip stopped states (no significant movement)
+                    action_too_small = abs(left) <= 5 and abs(right) <= 5
+
+                    # Skip weak rotations during collision (must be strong rotation)
+                    weak_rotation_during_collision = collision_active and abs(left - right) < 30
+
+                    should_skip = action_too_small or weak_rotation_during_collision
+
+                    if not should_skip:
+                        recorder.record_frame(
+                            action_left=left,
+                            action_right=right,
+                            collision=collision_active,
+                            joystick_x=x,
+                            joystick_y=y,
+                        )
 
             await asyncio.sleep(period)
     finally:

@@ -1,8 +1,12 @@
 """
 Episode recorder for toio control data in LeRobot dataset format.
 
-Records observation.state (joystick input) and action (motor commands) to create
-a dataset compatible with LeRobot for imitation learning.
+Records observation.state (collision flag) and action (motor commands)
+to create a dataset compatible with LeRobot for imitation learning.
+
+Observation: [collision] (1D - super simple!)
+  - collision: 0.0 or 1.0, indicates if cube is hitting obstacle
+Action: [left_motor, right_motor] (2D)
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ class Frame:
     """Single frame of recorded data."""
 
     timestamp: float
-    observation_state: list[float]  # [collision]
+    observation_state: list[float]  # [collision, random_seed] - state + episode seed
     action: list[float]  # [left_motor, right_motor] commands
     frame_index: int
     episode_index: int
@@ -55,7 +59,7 @@ class EpisodeRecorder:
     Records teleoperation data in LeRobot dataset format.
 
     LeRobot dataset structure:
-    - observation.state: Input state [collision]
+    - observation.state: [collision, random_seed]
     - action: Motor commands [left, right]
     - episode_index: Which episode this frame belongs to
     - frame_index: Frame number within episode
@@ -64,6 +68,11 @@ class EpisodeRecorder:
 
     Observation state format:
     - [0]: collision detected (0.0 or 1.0)
+    - [1]: random seed (0.0 to 1.0), fixed per episode for diverse rotation patterns
+
+    The random seed allows the model to learn different avoidance behaviors:
+    - Different seeds → different rotation patterns (left turn, right turn, etc.)
+    - Prevents getting stuck in loops by varying behavior
     """
 
     def __init__(self, output_dir: Path | str, fps: float = 60.0, dataset_name: str = "toio_dataset"):
@@ -84,21 +93,37 @@ class EpisodeRecorder:
         self.current_episode: Optional[Episode] = None
         self.is_recording = False
 
+        # Random seed for current episode (for diverse rotation patterns)
+        self.current_random_seed = 0.0
+
         # Check for existing dataset and set the starting episode index
         self.episode_offset = self._get_existing_episode_count()
 
-    def start_episode(self) -> None:
-        """Start recording a new episode."""
+    def start_episode(self, random_seed: float | None = None) -> None:
+        """
+        Start recording a new episode.
+
+        Args:
+            random_seed: Random seed for this episode (0.0-1.0). If None, generates random value.
+        """
+        import random
+
         episode_index = self.episode_offset + len(self.episodes)
         self.current_episode = Episode(episode_index=episode_index)
         self.is_recording = True
-        print(f"[Recorder] Started episode {episode_index}")
+
+        # Set random seed for this episode
+        self.current_random_seed = random_seed if random_seed is not None else random.random()
+
+        print(f"[Recorder] Started episode {episode_index}, random_seed={self.current_random_seed:.3f}")
 
     def record_frame(
         self,
         action_left: int,
         action_right: int,
         collision: bool = False,
+        joystick_x: float = 0.0,
+        joystick_y: float = 0.0,
     ) -> None:
         """
         Record a single frame of data.
@@ -107,9 +132,16 @@ class EpisodeRecorder:
             action_left: Left motor command (-100 to 100)
             action_right: Right motor command (-100 to 100)
             collision: Whether collision was detected in this frame
+            joystick_x: Ignored (kept for backward compatibility)
+            joystick_y: Ignored (kept for backward compatibility)
         """
         if not self.is_recording or self.current_episode is None:
             return
+
+        # Quantize actions to reduce noise from joystick jitter
+        # Round to nearest 10 (e.g., 57 -> 60, -8 -> -10, 3 -> 0)
+        action_left = round(action_left / 10) * 10
+        action_right = round(action_right / 10) * 10
 
         frame_index = len(self.current_episode.frames)
 
@@ -119,8 +151,27 @@ class EpisodeRecorder:
         else:
             timestamp = time.time() - self.current_episode.start_time
 
-        # Build observation: [collision]
-        observation_state = [float(1.0 if collision else 0.0)]
+        # Build observation: [collision, rotation_direction] (2D)
+        # - collision: 0.0 or 1.0, indicates if cube is hitting obstacle
+        # - rotation_direction: -1.0 (left) or 1.0 (right) ONLY during collision
+        #   Always 0.0 when not colliding (rotation intention doesn't matter during normal driving)
+        if collision:
+            # Only record rotation direction during collision
+            if abs(joystick_x) < 0.1:  # Deadzone
+                import random
+                rotation_direction = 1.0 if random.random() < 0.5 else -1.0  # Random if no input
+            elif joystick_x < 0:
+                rotation_direction = -1.0
+            else:
+                rotation_direction = 1.0
+        else:
+            # Always 0.0 when not colliding
+            rotation_direction = 0.0
+
+        observation_state = [
+            float(1.0 if collision else 0.0),
+            float(rotation_direction)
+        ]
 
         frame = Frame(
             timestamp=timestamp,
@@ -276,8 +327,8 @@ class EpisodeRecorder:
             "features": {
                 "observation.state": {
                     "dtype": "float32",
-                    "shape": [1],
-                    "names": ["collision"],
+                    "shape": [2],
+                    "names": ["collision", "rotation_direction"],
                 },
                 "action": {
                     "dtype": "float32",
