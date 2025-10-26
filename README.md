@@ -112,6 +112,10 @@ robot:
 uv run python scripts/inference.py models/policy.example.pth
 ```
 
+動作例は以下の動画の通りです。
+
+https://github.com/user-attachments/assets/00f324d9-398a-4f42-9d9b-438f364d7229
+
 toioは以下のパターンで動作します：
 1. 前進（速度40）
 2. 壁に衝突検知
