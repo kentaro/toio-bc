@@ -1,2 +1,0 @@
-"""LeRobot toio operator package."""
-

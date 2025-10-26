@@ -1,11 +1,13 @@
 """
-Episode recorder for toio control data in LeRobot dataset format.
+Episode recorder for toio control data in npz dataset format.
 
 Records observation.state (collision flag) and action (motor commands)
-to create a dataset compatible with LeRobot for imitation learning.
+to create a dataset for imitation learning.
 
-Observation: [collision] (1D - super simple!)
+Observation: [collision, rotation_direction, frame_count] (3D)
   - collision: 0.0 or 1.0, indicates if cube is hitting obstacle
+  - rotation_direction: -1.0 (left), 1.0 (right), or 0.0 (normal)
+  - frame_count: 0.0-1.0 (normalized counter during collision, 0.0 when normal)
 Action: [left_motor, right_motor] (2D)
 """
 
@@ -25,7 +27,7 @@ class Frame:
     """Single frame of recorded data."""
 
     timestamp: float
-    observation_state: list[float]  # [collision, random_seed] - state + episode seed
+    observation_state: list[float]  # [collision, rotation_direction, frame_count] - 3D observation
     action: list[float]  # [left_motor, right_motor] commands
     frame_index: int
     episode_index: int
@@ -56,10 +58,10 @@ class Episode:
 
 class EpisodeRecorder:
     """
-    Records teleoperation data in LeRobot dataset format.
+    Records teleoperation data in npz dataset format.
 
-    LeRobot dataset structure:
-    - observation.state: [collision, random_seed]
+    Dataset structure:
+    - observation.state: [collision, rotation_direction, frame_count]
     - action: Motor commands [left, right]
     - episode_index: Which episode this frame belongs to
     - frame_index: Frame number within episode
@@ -68,11 +70,12 @@ class EpisodeRecorder:
 
     Observation state format:
     - [0]: collision detected (0.0 or 1.0)
-    - [1]: random seed (0.0 to 1.0), fixed per episode for diverse rotation patterns
+    - [1]: rotation direction (-1.0 for left, 1.0 for right, 0.0 for normal)
+    - [2]: frame count (0.0-1.0, normalized counter during collision)
 
-    The random seed allows the model to learn different avoidance behaviors:
-    - Different seeds → different rotation patterns (left turn, right turn, etc.)
-    - Prevents getting stuck in loops by varying behavior
+    The frame_count allows the deterministic MLP to learn temporal transitions:
+    - Different frame_count values → different phases (backward vs rotation)
+    - Enables learning "backward then rotate" pattern without explicit state machine
     """
 
     def __init__(self, output_dir: Path | str, fps: float = 60.0, dataset_name: str = "toio_dataset"):
@@ -93,8 +96,11 @@ class EpisodeRecorder:
         self.current_episode: Optional[Episode] = None
         self.is_recording = False
 
-        # Random seed for current episode (for diverse rotation patterns)
-        self.current_random_seed = 0.0
+        # Collision state tracking (for frame_count)
+        self.collision_active = False
+        self.collision_frame_count = 0
+        self.current_rotation_direction = 0.0
+        self.max_collision_frames = 22  # backward(10) + rotation(12)
 
         # Check for existing dataset and set the starting episode index
         self.episode_offset = self._get_existing_episode_count()
@@ -104,18 +110,18 @@ class EpisodeRecorder:
         Start recording a new episode.
 
         Args:
-            random_seed: Random seed for this episode (0.0-1.0). If None, generates random value.
+            random_seed: Unused (kept for compatibility).
         """
-        import random
-
         episode_index = self.episode_offset + len(self.episodes)
         self.current_episode = Episode(episode_index=episode_index)
         self.is_recording = True
 
-        # Set random seed for this episode
-        self.current_random_seed = random_seed if random_seed is not None else random.random()
+        # Reset collision tracking
+        self.collision_active = False
+        self.collision_frame_count = 0
+        self.current_rotation_direction = 0.0
 
-        print(f"[Recorder] Started episode {episode_index}, random_seed={self.current_random_seed:.3f}")
+        print(f"[Recorder] Started episode {episode_index}")
 
     def record_frame(
         self,
@@ -151,26 +157,38 @@ class EpisodeRecorder:
         else:
             timestamp = time.time() - self.current_episode.start_time
 
-        # Build observation: [collision, rotation_direction] (2D)
-        # - collision: 0.0 or 1.0, indicates if cube is hitting obstacle
-        # - rotation_direction: -1.0 (left) or 1.0 (right) ONLY during collision
-        #   Always 0.0 when not colliding (rotation intention doesn't matter during normal driving)
-        if collision:
-            # Only record rotation direction during collision
+        # Track collision state for frame_count
+        if collision and not self.collision_active:
+            # New collision detected
+            self.collision_active = True
+            self.collision_frame_count = 0
+            # Determine rotation direction from joystick input
             if abs(joystick_x) < 0.1:  # Deadzone
                 import random
-                rotation_direction = 1.0 if random.random() < 0.5 else -1.0  # Random if no input
+                rotation_direction = 1.0 if random.random() < 0.5 else -1.0
             elif joystick_x < 0:
                 rotation_direction = -1.0
             else:
                 rotation_direction = 1.0
+            self.current_rotation_direction = rotation_direction
+        elif self.collision_active:
+            # Continue collision avoidance
+            self.collision_frame_count += 1
+            if self.collision_frame_count >= self.max_collision_frames:
+                # End collision avoidance
+                self.collision_active = False
+                self.collision_frame_count = 0
+            rotation_direction = self.current_rotation_direction
         else:
-            # Always 0.0 when not colliding
+            # Normal driving
             rotation_direction = 0.0
 
+        # Build observation: [collision, rotation_direction, frame_count] (3D)
+        normalized_count = (self.collision_frame_count / (self.max_collision_frames - 1)) if self.collision_active else 0.0
         observation_state = [
-            float(1.0 if collision else 0.0),
-            float(rotation_direction)
+            float(1.0 if self.collision_active else 0.0),
+            float(rotation_direction),
+            float(min(normalized_count, 1.0))
         ]
 
         frame = Frame(
@@ -218,7 +236,7 @@ class EpisodeRecorder:
 
     def save_dataset(self) -> Path:
         """
-        Save all recorded episodes as a LeRobot-compatible dataset.
+        Save all recorded episodes as a npz dataset.
         If the dataset already exists, new episodes are appended to it.
 
         Returns:
@@ -233,8 +251,8 @@ class EpisodeRecorder:
         # Load existing dataset if it exists
         data_file = dataset_dir / "data.npz"
 
-        # Prepare data in LeRobot format
-        new_data = self._prepare_lerobot_data()
+        # Prepare data in npz format
+        new_data = self._prepare_dataset()
 
         # Merge with existing data if available
         if data_file.exists():
@@ -288,8 +306,8 @@ class EpisodeRecorder:
 
         return dataset_dir
 
-    def _prepare_lerobot_data(self) -> dict[str, np.ndarray]:
-        """Prepare data in LeRobot dataset format."""
+    def _prepare_dataset(self) -> dict[str, np.ndarray]:
+        """Prepare data in npz dataset format."""
         all_frames = [frame for episode in self.episodes for frame in episode.frames]
 
         if not all_frames:
@@ -327,8 +345,8 @@ class EpisodeRecorder:
             "features": {
                 "observation.state": {
                     "dtype": "float32",
-                    "shape": [2],
-                    "names": ["collision", "rotation_direction"],
+                    "shape": [3],
+                    "names": ["collision", "rotation_direction", "frame_count"],
                 },
                 "action": {
                     "dtype": "float32",

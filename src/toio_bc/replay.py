@@ -12,17 +12,12 @@ The dataset contains:
 
 import argparse
 import asyncio
-import sys
 from pathlib import Path
-
-# Add project root to Python path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
 
 import numpy as np
 import yaml
 
-from lerobot_operator.toio_driver import ToioDriver, ToioDriverConfig
+from .core.toio_driver import ToioDriver, ToioDriverConfig
 
 
 async def replay_episode(driver: ToioDriver, dataset_path: Path, episode_idx: int = 0):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run inference with a trained policy model."""
+"""Start the toio operator with web UI."""
 
 import sys
 from pathlib import Path
@@ -8,7 +8,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
 
-from toio_bc.inference import main
+from toio_bc.operator import main
 
 if __name__ == "__main__":
     main()
